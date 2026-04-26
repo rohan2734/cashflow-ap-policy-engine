@@ -13,6 +13,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     networks:
       - app-net
 
@@ -29,6 +31,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    ports:
+      - "${LANGFUSE_POSTGRES_PORT:-5433}:5432"
     networks:
       - langfuse-net
 

@@ -283,7 +283,7 @@ class LLMProviderModel(Base):
     __tablename__ = "llm_providers"
     provider_id = Column(String, primary_key=True)
     name        = Column(String, nullable=False)
-    type        = Column(String, nullable=False)   # nvidia | bedrock
+    type        = Column(String, nullable=False)   # nvidia | bedrock | openrouter
     config      = Column(JSON, nullable=False)
     # config: { model, temperature, max_tokens, base_url, ... }
     # shape differs per provider type — JSONB avoids forcing a shared schema
@@ -394,13 +394,14 @@ async def _seed_llm_provider(session: AsyncSession) -> LLMProviderModel:
         return existing
     provider = LLMProviderModel(
         provider_id=f"P-{uuid.uuid4().hex[:8].upper()}",
-        name="NVIDIA Default",
-        type="nvidia",
+        name="OpenRouter Default",
+        type="openrouter",
         config={
-            "model": "meta/llama-3.1-70b-instruct",
+            # extraction default — fast, stable JSON output
+            "model": "meta-llama/llama-3-8b-instruct",
             "temperature": 0.1,
             "max_tokens": 2048,
-            "base_url": "https://integrate.api.nvidia.com/v1",
+            "base_url": "https://openrouter.ai/api/v1",
         },
         active=True,
     )
@@ -643,12 +644,23 @@ class LLMCallError(Exception):
     pass
 
 class LLMClient:
-    def __init__(self, config: LLMConfig, nvidia_api_key: str, aws_credentials: dict) -> None:
+    def __init__(
+        self,
+        config: LLMConfig,
+        nvidia_api_key: str,
+        openrouter_api_key: str,
+        aws_credentials: dict,
+    ) -> None:
         self._config = config
         if config.provider == "nvidia":
             self._openai = AsyncOpenAI(
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key=nvidia_api_key,
+            )
+        elif config.provider == "openrouter":
+            self._openai = AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=openrouter_api_key,
             )
         elif config.provider == "bedrock":
             import boto3
@@ -667,11 +679,11 @@ class LLMClient:
         raise LLMCallError("LLM call failed after 3 attempts") from last_exc
 
     async def _call(self, prompt: str) -> str:
-        if self._config.provider == "nvidia":
-            return await self._nvidia_call(prompt)
+        if self._config.provider in ("nvidia", "openrouter"):
+            return await self._openai_call(prompt)
         return await self._bedrock_call(prompt)
 
-    async def _nvidia_call(self, prompt: str) -> str:
+    async def _openai_call(self, prompt: str) -> str:
         resp = await self._openai.chat.completions.create(
             model=self._config.model,
             messages=[{"role": "user", "content": prompt}],
@@ -1220,6 +1232,7 @@ def get_llm() -> LLMClient:
     return LLMClient(
         config=cfg.llm,
         nvidia_api_key=os.environ.get("NVIDIA_API_KEY", ""),
+        openrouter_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         aws_credentials={
             "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID", ""),
             "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
@@ -1506,7 +1519,30 @@ export async function setReviewThreshold(threshold: number): Promise<{ threshold
 | `/review` | none | `ReviewCard` list — confidence `Badge`, extracted action, source clause; Approve/Escalate/Reject `Button`s; `Dialog` confirm before submit |
 | `/settings` | none | `ThresholdSlider` for confidence threshold; links to pipeline and provider sub-pages |
 | `/settings/pipeline` | none | `ConfigEditor` — loads active pipeline `config` JSONB via `GET /config/pipeline`; saves via `PATCH /config/pipeline` |
-| `/settings/provider` | none | `ConfigEditor` — loads active provider `config` JSONB via `GET /config/provider`; saves via `PATCH /config/provider` |
+| `/settings/provider` | none | `ConfigEditor` — loads active provider `config` JSONB via `GET /config/provider`; saves via `PATCH /config/provider`. Includes a `Select` for provider type (`nvidia` / `openrouter` / `bedrock`) and a model `Select` whose options update based on the chosen provider (see OpenRouter model catalogue below) |
+
+### OpenRouter model catalogue (used in `/settings/provider` Select)
+
+Two groups are shown in the `Select` component; the group label explains the intended use.
+
+**Extraction** (default — fast, stable JSON output)
+
+| Display label | OpenRouter model ID |
+|---------------|---------------------|
+| Llama 3 8B Instruct *(default)* | `meta-llama/llama-3-8b-instruct` |
+
+**Answer generation / RAG** (better reasoning, multi-chunk context)
+
+| Display label | OpenRouter model ID | Notes |
+|---------------|---------------------|-------|
+| Mixtral 8x7B Instruct | `mistralai/mixtral-8x7b-instruct` | Best free reasoning; handles long context well |
+| Llama 3 70B Instruct | `meta-llama/llama-3-70b-instruct` | Strongest reasoning; may have rate limits on free tier |
+
+The selected `model` value is stored in `llm_providers.config.model` (JSONB). Changing the model in the UI writes it via `PATCH /config/provider` — no code change or migration required.
+
+`OPENROUTER_API_KEY` must be present in `.env`. When `provider.type == "openrouter"` and the key is empty the app raises `ConfigError` on startup.
+
+---
 
 ### ConfidenceBadge thresholds
 
@@ -1562,3 +1598,4 @@ Remaining items before production:
 | 7 | `settings` table (key-value)? | **Dropped.** `confidence_threshold` and all pipeline-level settings live in `pipelines.config JSONB`. No key-value store needed. |
 | 8 | Prompt versioning — Langfuse vs DB? | **Both, linked.** Langfuse owns content + full version history. DB `prompts` table stores `(name, version, langfuse_prompt_id, active)` — the reference that tells a pipeline which version to fetch. Link key: `(name, version)` is the same in both systems. |
 | 9 | `review_confidence_threshold` — column or JSONB key? | **JSONB key inside `pipelines.config`.** It is read in Python, never filtered in SQL, so a dedicated column adds no value and every new setting would require a migration. |
+| 10 | LLM provider for default seed — NVIDIA or OpenRouter? | **OpenRouter.** Free tier covers the two required use cases without credentials beyond an API key: Llama 3 8B for extraction (fast, stable JSON) and Mixtral 8x7B / Llama 3 70B for RAG answer generation (better reasoning). NVIDIA and Bedrock remain supported via `provider.type` — users switch in `/settings/provider`. `LLMClient._nvidia_call` is renamed `_openai_call` since both NVIDIA and OpenRouter use the OpenAI-compatible API; only the `base_url` and key differ. |
