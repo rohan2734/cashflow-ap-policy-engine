@@ -1,0 +1,14 @@
+{
+  "llm": {
+    "provider": "nvidia",
+    "model": "meta/llama-3.1-70b-instruct",
+    "temperature": 0.1,
+    "max_tokens": 2048
+  },
+  "concurrency": {
+    "max_parallel_clauses": 5
+  },
+  "notifications": {
+    "endpoint": ""
+  }
+}

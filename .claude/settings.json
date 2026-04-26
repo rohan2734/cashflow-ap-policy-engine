@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001)",
+      "PowerShell(Invoke-WebRequest -Uri \"http://localhost:3001\" -TimeoutSec 10 -UseBasicParsing 2>&1)",
+      "PowerShell(netstat -ano)",
+      "PowerShell(foreach \\($pid in @\\(18516, 28044\\)\\) { try { $p = Get-Process -Id $pid -ErrorAction Stop; Write-Output \"$pid -> $\\($p.ProcessName\\) | $\\($p.MainWindowTitle\\)\" } catch { Write-Output \"$pid -> NOT FOUND\" } })",
+      "PowerShell($ids = @\\(18516, 28044\\); foreach \\($id in $ids\\) { try { $p = Get-Process -Id $id -ErrorAction Stop; Write-Output \"$id -> $\\($p.ProcessName\\)\" } catch { Write-Output \"$id -> NOT FOUND\" } })",
+      "Bash(curl -v --max-time 5 http://172.18.0.3:3000/)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\jagan\\Documents\\coding\\assesment\\cashflo\\types"
+    ]
+  }
+}

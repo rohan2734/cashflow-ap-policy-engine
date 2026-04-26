@@ -1,0 +1,64 @@
+# Production overrides. Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Note: both api and ui override volumes: [] here so no host source is mounted
+# in production — all code is baked into the image at build time.
+
+version: "3.9"
+
+services:
+  postgres:
+    restart: unless-stopped
+    mem_limit: 512m
+
+  langfuse-postgres:
+    restart: unless-stopped
+    mem_limit: 512m
+
+  langfuse-redis:
+    restart: unless-stopped
+    mem_limit: 128m
+
+  langfuse-web:
+    restart: unless-stopped
+    mem_limit: 512m
+    ports: []
+
+  langfuse-worker:
+    restart: unless-stopped
+    mem_limit: 256m
+
+  api:
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes: []
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
+    ports: []
+
+  ui:
+    build:
+      target: prod
+    volumes: []
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: "0.5"
+    ports: []
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - ui
+    restart: unless-stopped
+    mem_limit: 128m
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
