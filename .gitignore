@@ -28,3 +28,6 @@ ui/out/
 .vscode/
 *.swp
 *.swo
+.codegraph
+
+docs\plans\implementation_plan.md
