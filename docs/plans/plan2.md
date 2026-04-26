@@ -9,13 +9,25 @@ DONE   Dockerfile, docker-compose.yml, docker-compose.prod.yml
 DONE   infra/nginx/nginx.conf
 DONE   .env.example, config.json, requirements.txt
 DONE   db/init.sql
-STUB   shared_types/, config/, db/, llm/, pipeline/, engine/, notifications/, visualization/, api/
-STUB   main.py  (health route only)
-STUB   ui/src/app/page.tsx  (placeholder only)
+DONE   Phase 1: shared_types, config, db (models, connector, seeder, queries)
+DONE   Phase 2: llm/prompts, llm/client
+DONE   Phase 3: pipeline steps (parser through conflict_detector)
+DONE   Phase 4: pipeline/orchestrator
+DONE   Phase 5: engine/evaluator, engine/executor
+TODO   Phase 6: notifications/dispatcher, visualization/graph_builder
+DONE   Phase 7: api/schemas, api/dependencies, api/routes, main.py update
+DONE   Phase 8: UI
+TODO   Phase 9: production hardening
 ```
 
 Default config is seeded into the DB on first boot — `config.json` is removed.
 Seeder inserts default rows into `llm_providers`, `prompts`, and `pipelines` if tables are empty.
+
+**File Storage Status:**
+- Current implementation: Files are saved to `/tmp/` during processing and deleted after pipeline completes
+- Database stores only document metadata (`doc_id`, `filename`, `pipeline_id`, `created_at`)
+- No persistent file storage exists yet
+- For UI file display, need to implement: `file_storage/` directory, `file_path` column in `documents` table, file serving endpoint
 
 ---
 
@@ -948,8 +960,6 @@ from db import queries
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REVIEW_THRESHOLD = 0.5
-
 async def run_pipeline(
     file_path: str,
     doc_id: str,
@@ -967,8 +977,8 @@ async def run_pipeline(
     conflicts = detect_conflicts(rules)
 
     async with db.session() as session:
-        raw_threshold = await queries.get_setting(session, "review_confidence_threshold")
-        threshold = float(raw_threshold) if raw_threshold else DEFAULT_REVIEW_THRESHOLD
+        # threshold comes from pipelines.config JSONB via AppConfig (Decision #9)
+        threshold = config.confidence_threshold
         for rule in rules:
             status = "pending_review" if rule.confidence < threshold else "auto_approved"
             await queries.insert_rule(session, rule, status=status)
@@ -1210,17 +1220,26 @@ class ReviewThresholdRequest(BaseModel):
 
 ### api/dependencies.py
 
+Config is set during lifespan via `set_config()`; `config.json` is gone (Decision #6).
+`get_llm()` is lru_cache — changing provider config requires a server restart to pick up a new `LLMClient` (acceptable for MVP).
+
 ```python
 import os
 from functools import lru_cache
-from config.loader import load_config
 from config.types import AppConfig
 from llm.client import LLMClient
 from db.connector import DBConnector
 
-@lru_cache
+_config: AppConfig | None = None
+
+def set_config(config: AppConfig) -> None:
+    global _config
+    _config = config
+
 def get_config() -> AppConfig:
-    return load_config("config.json")
+    if _config is None:
+        raise RuntimeError("App config not initialized — lifespan did not complete")
+    return _config
 
 @lru_cache
 def get_db() -> DBConnector:
@@ -1371,22 +1390,31 @@ async def set_review_threshold(body: ReviewThresholdRequest):
 
 ### main.py (updated)
 
+Lifespan: create tables → seed defaults → load config from DB → store in `set_config()`.
+
 ```python
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from api.routes import router
-from api.dependencies import get_db
+from api.dependencies import get_db, set_config
+from db.seeder import seed_defaults
+from config.loader import load_config_from_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await get_db().create_tables()
+    db = get_db()
+    await db.create_tables()
+    async with db.session() as session:
+        await seed_defaults(session)
+        config = await load_config_from_db(session)
+        set_config(config)
     yield
 
 app = FastAPI(title="CashFlo Policy Engine", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, str]:
     return {"status": "ok"}
 ```
 
