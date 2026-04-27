@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from shared_types.rules import RuleRecord, ConflictReport, ASTNode
 from llm.client import LLMClient
@@ -274,7 +275,52 @@ async def _llm_conflict_check(
     )
     try:
         raw = await llm.generate(prompt)
-        parsed = json.loads(raw.strip())
+        logger.info(
+            "conflict_check_llm_response_received",
+            extra={
+                "rule_ids": [r1.rule_id, r2.rule_id],
+                "response_length": len(raw),
+                "response_preview": raw[:500] if len(raw) > 500 else raw,
+            },
+        )
+        # Try to extract JSON from markdown code blocks first
+        json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', raw, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Fallback: try to find JSON object in the response
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                # Last resort: try parsing the entire response
+                json_str = raw.strip()
+
+        parsed = json.loads(json_str)
+        logger.info(
+            "conflict_check_parse_success",
+            extra={
+                "rule_ids": [r1.rule_id, r2.rule_id],
+                "has_conflict": parsed.get("conflicts", False),
+                "reason": parsed.get("reason", ""),
+                "parsed_keys": list(parsed.keys()),
+            },
+        )
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "conflict_check_parse_error",
+            extra={
+                "rule_ids": [r1.rule_id, r2.rule_id],
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "error_message": exc.msg,
+                "error_line": exc.lineno,
+                "error_column": exc.colno,
+                "raw_response": raw,
+                "json_attempt": json_str if 'json_str' in locals() else "N/A",
+            },
+        )
+        return None
     except Exception as exc:
         logger.warning(
             "conflict_check_failed",
@@ -282,6 +328,7 @@ async def _llm_conflict_check(
                 "rule_ids": [r1.rule_id, r2.rule_id],
                 "error": str(exc),
                 "error_type": type(exc).__name__,
+                "error_details": getattr(exc, '__dict__', {}),
             },
         )
         return None

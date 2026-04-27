@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from shared_types.pipeline import EnrichedClause, RawExtraction
 from llm.client import LLMClient
@@ -46,26 +47,46 @@ async def extract_clause(clause: EnrichedClause, llm: LLMClient, config: LLMConf
 
     raw = await llm.generate(EXTRACTION_PROMPT.format(clause_text=context))
 
-    logger.debug(
-        "extract_clause_llm_response",
+    logger.info(
+        "extract_clause_llm_response_received",
         extra={
             "clause_id": clause.id,
             "response_length": len(raw),
+            "response_preview": raw[:500] if len(raw) > 500 else raw,
         },
     )
 
     try:
-        parsed = json.loads(raw.strip().strip("```json").strip("```").strip())
+        # Try to extract JSON from markdown code blocks first
+        json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', raw, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Fallback: try to find JSON object in the response
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                # Last resort: try parsing the entire response
+                json_str = raw.strip()
+
+        parsed = json.loads(json_str)
     except json.JSONDecodeError as exc:
         logger.error(
             "extract_clause_parse_error",
             extra={
                 "clause_id": clause.id,
                 "error": str(exc),
-                "raw_response": raw[:500],
+                "error_message": exc.msg,
+                "error_line": exc.lineno,
+                "error_column": exc.colno,
+                "raw_response_length": len(raw),
+                "raw_response": raw,
+                "json_attempt": json_str if 'json_str' in locals() else "N/A",
+                "json_attempt_length": len(json_str) if 'json_str' in locals() else 0,
             },
         )
-        raise ExtractionError(f"JSON parse failed for clause {clause.id!r}: {raw!r}") from exc
+        raise ExtractionError(f"JSON parse failed for clause {clause.id!r}: {exc.msg} at line {exc.lineno}, column {exc.colno}") from exc
 
     result = RawExtraction(
         clause_id=clause.id,
@@ -80,9 +101,13 @@ async def extract_clause(clause: EnrichedClause, llm: LLMClient, config: LLMConf
         extra={
             "clause_id": clause.id,
             "action": result.action_raw,
+            "action_length": len(result.action_raw) if result.action_raw else 0,
             "confidence": result.confidence_raw,
             "has_condition": bool(result.condition_raw),
+            "condition_preview": str(result.condition_raw)[:200] if result.condition_raw else "None",
             "exceptions_count": len(result.exceptions_raw),
+            "exceptions_preview": str(result.exceptions_raw)[:200] if result.exceptions_raw else "None",
+            "parsed_json_keys": list(parsed.keys()),
         },
     )
 

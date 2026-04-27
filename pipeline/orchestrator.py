@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 
 from shared_types.pipeline import EnrichedClause, RawExtraction, ValidatedExtraction
 from shared_types.rules import RuleRecord
@@ -194,6 +195,10 @@ async def _process(
                     "clause_id": clause.id,
                     "error": str(exc),
                     "error_type": type(exc).__name__,
+                    "error_details": getattr(exc, '__dict__', {}),
+                    "had_raw_extraction": raw is not None,
+                    "previous_action": raw.action_raw if raw else "unknown",
+                    "previous_condition": raw.condition_raw if raw else {},
                 },
             )
             try:
@@ -206,13 +211,45 @@ async def _process(
                     valid_ops=", ".join(sorted(VALID_OPS)),
                 )
                 text = await llm.generate(retry_prompt)
-                parsed = json.loads(text.strip())
+                logger.info(
+                    "extraction_retry_llm_response",
+                    extra={
+                        "doc_id": doc_id,
+                        "clause_id": clause.id,
+                        "retry_response_length": len(text),
+                        "retry_response_preview": text[:500] if len(text) > 500 else text,
+                    },
+                )
+                # Try to extract JSON from markdown code blocks first
+                json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                else:
+                    # Fallback: try to find JSON object in the response
+                    json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                    else:
+                        # Last resort: try parsing the entire response
+                        json_str = text.strip()
+
+                parsed = json.loads(json_str)
+                logger.info(
+                    "extraction_retry_parse_success",
+                    extra={
+                        "doc_id": doc_id,
+                        "clause_id": clause.id,
+                        "parsed_action": parsed.get("action", ""),
+                        "parsed_confidence": parsed.get("confidence", 0.5),
+                        "parsed_keys": list(parsed.keys()),
+                    },
+                )
                 raw = RawExtraction(
                     clause_id=clause.id,
                     condition_raw=parsed.get("condition", {}),
                     action_raw=parsed.get("action", ""),
                     exceptions_raw=parsed.get("exceptions", []),
-                    confidence_raw=float(parsed.get("confidence", 0.5)),
+                    confidence_raw=float(parsed.get("confidence") or 0.5),
                 )
                 v = validate_extraction(raw)
                 validated = ValidatedExtraction(
@@ -239,6 +276,11 @@ async def _process(
                         "clause_id": clause.id,
                         "error": str(retry_exc),
                         "error_type": type(retry_exc).__name__,
+                        "error_details": getattr(retry_exc, '__dict__', {}),
+                        "retry_llm_response_length": len(text) if 'text' in locals() else 0,
+                        "retry_llm_response": text if 'text' in locals() else "N/A",
+                        "original_error": str(exc),
+                        "original_error_type": type(exc).__name__,
                     },
                 )
                 return None

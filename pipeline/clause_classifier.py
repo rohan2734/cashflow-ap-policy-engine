@@ -45,14 +45,39 @@ async def classify_normative_blocks(blocks: list[RawBlock], llm: LLMClient) -> l
 
     raw = await llm.generate(CLASSIFY_PROMPT.format(blocks=blocks_text))
 
-    logger.debug(
-        "classify_llm_call_complete",
-        extra={"response_length": len(raw)},
+    logger.info(
+        "classify_llm_response_received",
+        extra={
+            "blocks_count": len(blocks),
+            "response_length": len(raw),
+            "response_preview": raw[:500] if len(raw) > 500 else raw,
+        },
     )
 
     try:
-        parsed = json.loads(raw.strip())
+        # Try to extract JSON from markdown code blocks first
+        json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', raw, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Fallback: try to find JSON object in the response
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                # Last resort: try parsing the entire response
+                json_str = raw.strip()
+
+        parsed = json.loads(json_str)
         llm_indices = set(parsed["normative_indices"])
+        logger.info(
+            "classify_parse_success",
+            extra={
+                "llm_indices": list(llm_indices),
+                "llm_indices_count": len(llm_indices),
+                "parsed_json_keys": list(parsed.keys()),
+            },
+        )
     except (json.JSONDecodeError, KeyError) as exc:
         logger.error(
             "classify_parse_error",

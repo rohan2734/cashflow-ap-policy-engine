@@ -1,8 +1,11 @@
+import logging
 import os
 from contextvars import ContextVar
 from typing import Any
 
 from langfuse import Langfuse, observe
+
+logger = logging.getLogger(__name__)
 
 _trace_ctx: ContextVar[dict[str, Any]] = ContextVar("langfuse_trace_ctx", default={})
 
@@ -18,6 +21,15 @@ def get_langfuse() -> Langfuse:
             raise RuntimeError(
                 "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set in environment"
             )
+
+        logger.info(
+            "langfuse_init",
+            extra={
+                "host": host,
+                "has_public_key": bool(public_key),
+                "has_secret_key": bool(secret_key),
+            },
+        )
 
         get_langfuse._instance = Langfuse(
             public_key=public_key,

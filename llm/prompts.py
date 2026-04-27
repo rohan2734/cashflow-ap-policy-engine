@@ -17,7 +17,11 @@ Valid ops: >, <, >=, <=, ==, AND, OR, NOT
 For unconditional obligations ("vendor must provide X"), express the violation
 condition as the rule (e.g. po_matched == false → REJECT).
 
-Return ONLY valid JSON:
+IMPORTANT: Return ONLY the raw JSON object. Do NOT wrap it in markdown code blocks.
+Do NOT add any explanatory text before or after the JSON.
+Do NOT use ```json or ``` formatting.
+
+Output format:
 {{
   "condition": {{"op": "<op>", "left": "<field or node>", "right": "<value or node>"}},
   "action": "APPROVE | ESCALATE | REJECT",
@@ -88,7 +92,11 @@ What was previously extracted:
 Valid actions: {valid_actions}
 Valid ops:     {valid_ops}
 
-Return ONLY valid JSON with "condition", "action", "exceptions", "confidence".
+IMPORTANT: Return ONLY the raw JSON object. Do NOT wrap it in markdown code blocks.
+Do NOT add any explanatory text before or after the JSON.
+Do NOT use ```json or ``` formatting.
+
+Output format: {{"condition": ..., "action": ..., "exceptions": [...], "confidence": ...}}
 
 Clause:
 {clause_text}
@@ -109,7 +117,11 @@ page numbers, pure cross-references with no obligation.
 Blocks:
 {blocks}
 
-Return ONLY valid JSON: {{"normative_indices": [0, 2, 5, ...]}}
+IMPORTANT: Return ONLY the raw JSON object. Do NOT wrap it in markdown code blocks.
+Do NOT add any explanatory text before or after the JSON.
+Do NOT use ```json or ``` formatting.
+
+Output format: {{"normative_indices": [0, 2, 5, ...]}}
 """
 
 CONFLICT_CHECK_PROMPT = """\
@@ -124,7 +136,11 @@ Rule 1 (action: {action1}):
 Rule 2 (action: {action2}):
   condition: {condition2}
 
-Return ONLY valid JSON:
+IMPORTANT: Return ONLY the raw JSON object. Do NOT wrap it in markdown code blocks.
+Do NOT add any explanatory text before or after the JSON.
+Do NOT use ```json or ``` formatting.
+
+Output format:
 {{"conflicts": true, "reason": "<brief explanation>"}}
 or
 {{"conflicts": false, "reason": ""}}

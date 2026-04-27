@@ -1,3 +1,14 @@
+
+
+
+
+
+
+
+
+
+
+
 from shared_types.pipeline import RawExtraction, ValidatedExtraction
 
 
@@ -30,9 +41,9 @@ def validate_extraction(raw: RawExtraction) -> ValidatedExtraction:
 
 def _check_ops(node: dict, clause_id: str) -> None:
     op = node.get("op")
-    if op and op not in VALID_OPS:
+    if not op or op not in VALID_OPS:
         raise ValidationError(
-            f"Unknown op {op!r} in {clause_id!r}. "
+            f"Invalid or missing op {op!r} in {clause_id!r}. "
             f"Valid ops: {', '.join(sorted(VALID_OPS))}"
         )
     for key in ("left", "right"):

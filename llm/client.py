@@ -57,6 +57,7 @@ class LLMClient:
                 "provider": self._config.provider,
                 "model": self._config.model,
                 "prompt_length": len(prompt),
+                "prompt_preview": prompt[:300] if len(prompt) > 300 else prompt,
                 "trace_context": trace_ctx,
             },
         )
@@ -72,6 +73,7 @@ class LLMClient:
                         "model": self._config.model,
                         "attempt": attempt + 1,
                         "output_length": len(result),
+                        "output_preview": result[:300] if len(result) > 300 else result,
                     },
                 )
                 return result
