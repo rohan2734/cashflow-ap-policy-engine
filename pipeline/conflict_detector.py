@@ -39,7 +39,19 @@ _COMPOUND_OPS = {"AND", "OR", "NOT"}
 
 
 def detect_numeric_conflicts(rules: list[RuleRecord]) -> list[ConflictReport]:
+    logger.debug(
+        "numeric_conflict_detection_start",
+        extra={"total_rules": len(rules)},
+    )
+
     simple_numeric = [r for r in rules if _is_simple_numeric(r.condition)]
+    logger.debug(
+        "numeric_conflict_simple_rules",
+        extra={
+            "total_rules": len(rules),
+            "simple_numeric_rules": len(simple_numeric),
+        },
+    )
 
     by_field: dict[str, list[RuleRecord]] = {}
     for rule in simple_numeric:
@@ -47,17 +59,47 @@ def detect_numeric_conflicts(rules: list[RuleRecord]) -> list[ConflictReport]:
         field = _normalize_field(str(rule.condition.left))
         by_field.setdefault(field, []).append(rule)
 
+    logger.debug(
+        "numeric_conflict_fields",
+        extra={"fields_count": len(by_field), "fields": list(by_field.keys())},
+    )
+
     conflicts: list[ConflictReport] = []
     for field, group in by_field.items():
         conflicts.extend(_find_range_conflicts(field, group))
+
+    logger.info(
+        "numeric_conflict_detection_complete",
+        extra={
+            "total_rules": len(rules),
+            "simple_numeric_rules": len(simple_numeric),
+            "fields_checked": len(by_field),
+            "conflicts_found": len(conflicts),
+        },
+    )
+
     return conflicts
 
 
 async def detect_logical_conflicts(
     rules: list[RuleRecord], llm: LLMClient
 ) -> list[ConflictReport]:
+    logger.debug(
+        "logical_conflict_detection_start",
+        extra={"total_rules": len(rules)},
+    )
+
     compound = [r for r in rules if _is_compound(r.condition)]
+    logger.debug(
+        "logical_conflict_compound_rules",
+        extra={
+            "total_rules": len(rules),
+            "compound_rules": len(compound),
+        },
+    )
+
     conflicts: list[ConflictReport] = []
+    checks_performed = 0
 
     for i, r1 in enumerate(compound):
         for r2 in compound[i + 1:]:
@@ -65,9 +107,20 @@ async def detect_logical_conflicts(
                 continue
             if not _share_fields(r1.condition, r2.condition):
                 continue
+            checks_performed += 1
             report = await _llm_conflict_check(r1, r2, llm)
             if report:
                 conflicts.append(report)
+
+    logger.info(
+        "logical_conflict_detection_complete",
+        extra={
+            "total_rules": len(rules),
+            "compound_rules": len(compound),
+            "checks_performed": checks_performed,
+            "conflicts_found": len(conflicts),
+        },
+    )
 
     return conflicts
 
@@ -176,6 +229,14 @@ def _ast_to_text(node: ASTNode | str | float) -> str:
 async def _llm_conflict_check(
     r1: RuleRecord, r2: RuleRecord, llm: LLMClient
 ) -> ConflictReport | None:
+    logger.debug(
+        "conflict_check_start",
+        extra={
+            "rule_ids": [r1.rule_id, r2.rule_id],
+            "actions": [r1.action, r2.action],
+        },
+    )
+
     prompt = CONFLICT_CHECK_PROMPT.format(
         action1=r1.action,
         condition1=_ast_to_text(r1.condition),
@@ -188,12 +249,28 @@ async def _llm_conflict_check(
     except Exception as exc:
         logger.warning(
             "conflict_check_failed",
-            extra={"rule_ids": [r1.rule_id, r2.rule_id], "error": str(exc)},
+            extra={
+                "rule_ids": [r1.rule_id, r2.rule_id],
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
         )
         return None
 
     if not parsed.get("conflicts"):
+        logger.debug(
+            "conflict_check_no_conflict",
+            extra={"rule_ids": [r1.rule_id, r2.rule_id]},
+        )
         return None
+
+    logger.info(
+        "conflict_check_conflict_found",
+        extra={
+            "rule_ids": [r1.rule_id, r2.rule_id],
+            "reason": parsed.get("reason", ""),
+        },
+    )
 
     return ConflictReport(
         rule_ids=[r1.rule_id, r2.rule_id],
