@@ -14,14 +14,16 @@ from pipeline.rule_builder import build_rule
 from pipeline.conflict_detector import detect_numeric_conflicts, detect_logical_conflicts
 from llm.client import LLMClient, LLMCallError
 from llm.prompts import RETRY_EXTRACTION_PROMPT
-from llm.tracing import get_langfuse, set_trace_context
+from llm.tracing import set_trace_context
 from config.types import AppConfig
 from db.connector import DBConnector
 from db import queries
+from langfuse import observe
 
 logger = logging.getLogger(__name__)
 
 
+@observe()
 async def run_pipeline(
     file_path: str,
     doc_id: str,
@@ -29,17 +31,6 @@ async def run_pipeline(
     llm: LLMClient,
     db: DBConnector,
 ) -> list[RuleRecord]:
-    langfuse = get_langfuse()
-    trace = langfuse.trace(
-        name="run_pipeline",
-        metadata={
-            "doc_id": doc_id,
-            "pipeline_id": config.pipeline_id,
-            "provider": config.llm.provider,
-            "model": config.llm.model,
-        },
-    )
-
     set_trace_context(doc_id=doc_id, pipeline_id=config.pipeline_id)
 
     logger.info(
@@ -53,110 +44,102 @@ async def run_pipeline(
         },
     )
 
-    with trace.span(name="parse_pdf"):
-        logger.debug("pipeline_stage_parse_pdf_start", extra={"doc_id": doc_id})
-        blocks = parse_pdf(file_path)
-        logger.info(
-            "pipeline_stage_parse_pdf_complete",
-            extra={"doc_id": doc_id, "blocks_count": len(blocks)},
-        )
+    logger.debug("pipeline_stage_parse_pdf_start", extra={"doc_id": doc_id})
+    blocks = parse_pdf(file_path)
+    logger.info(
+        "pipeline_stage_parse_pdf_complete",
+        extra={"doc_id": doc_id, "blocks_count": len(blocks)},
+    )
 
-    with trace.span(name="classify_normative_blocks"):
-        logger.debug("pipeline_stage_classify_start", extra={"doc_id": doc_id})
-        normative_blocks = await classify_normative_blocks(blocks, llm)
-        logger.info(
-            "pipeline_stage_classify_complete",
-            extra={
-                "doc_id": doc_id,
-                "total_blocks": len(blocks),
-                "normative_blocks": len(normative_blocks),
-            },
-        )
+    logger.debug("pipeline_stage_classify_start", extra={"doc_id": doc_id})
+    normative_blocks = await classify_normative_blocks(blocks, llm)
+    logger.info(
+        "pipeline_stage_classify_complete",
+        extra={
+            "doc_id": doc_id,
+            "total_blocks": len(blocks),
+            "normative_blocks": len(normative_blocks),
+        },
+    )
 
-    with trace.span(name="split_into_clauses"):
-        logger.debug("pipeline_stage_split_start", extra={"doc_id": doc_id})
-        clauses = split_into_clauses(normative_blocks)
-        logger.info(
-            "pipeline_stage_split_complete",
-            extra={"doc_id": doc_id, "clauses_count": len(clauses)},
-        )
+    logger.debug("pipeline_stage_split_start", extra={"doc_id": doc_id})
+    clauses = split_into_clauses(normative_blocks)
+    logger.info(
+        "pipeline_stage_split_complete",
+        extra={"doc_id": doc_id, "clauses_count": len(clauses)},
+    )
 
-    with trace.span(name="resolve_references"):
-        logger.debug("pipeline_stage_resolve_start", extra={"doc_id": doc_id})
-        enriched = resolve_references(clauses)
-        logger.info(
-            "pipeline_stage_resolve_complete",
-            extra={
-                "doc_id": doc_id,
-                "clauses_count": len(enriched),
-                "total_references": sum(len(c.referenced_clauses) for c in enriched),
-            },
-        )
+    logger.debug("pipeline_stage_resolve_start", extra={"doc_id": doc_id})
+    enriched = resolve_references(clauses)
+    logger.info(
+        "pipeline_stage_resolve_complete",
+        extra={
+            "doc_id": doc_id,
+            "clauses_count": len(enriched),
+            "total_references": sum(len(c.referenced_clauses) for c in enriched),
+        },
+    )
 
-    with trace.span(name="extract_rules"):
-        logger.debug(
-            "pipeline_stage_extract_start",
-            extra={
-                "doc_id": doc_id,
-                "clauses_count": len(enriched),
-                "max_parallel": config.concurrency.max_parallel_clauses,
-            },
-        )
-        sem = asyncio.Semaphore(config.concurrency.max_parallel_clauses)
-        results = await asyncio.gather(*[_process(c, doc_id, config, llm, sem) for c in enriched])
-        rules = [r for r in results if r is not None]
-        logger.info(
-            "pipeline_stage_extract_complete",
-            extra={
-                "doc_id": doc_id,
-                "total_clauses": len(enriched),
-                "successful_extractions": len(rules),
-                "failed_extractions": len(enriched) - len(rules),
-            },
-        )
+    logger.debug(
+        "pipeline_stage_extract_start",
+        extra={
+            "doc_id": doc_id,
+            "clauses_count": len(enriched),
+            "max_parallel": config.concurrency.max_parallel_clauses,
+        },
+    )
+    sem = asyncio.Semaphore(config.concurrency.max_parallel_clauses)
+    results = await asyncio.gather(*[_process(c, doc_id, config, llm, sem) for c in enriched])
+    rules = [r for r in results if r is not None]
+    logger.info(
+        "pipeline_stage_extract_complete",
+        extra={
+            "doc_id": doc_id,
+            "total_clauses": len(enriched),
+            "successful_extractions": len(rules),
+            "failed_extractions": len(enriched) - len(rules),
+        },
+    )
 
-    with trace.span(name="detect_conflicts"):
-        logger.debug("pipeline_stage_conflict_start", extra={"doc_id": doc_id})
-        numeric_conflicts = detect_numeric_conflicts(rules)
-        logical_conflicts = await detect_logical_conflicts(rules, llm)
-        conflicts = numeric_conflicts + logical_conflicts
-        logger.info(
-            "pipeline_stage_conflict_complete",
-            extra={
-                "doc_id": doc_id,
-                "numeric_conflicts": len(numeric_conflicts),
-                "logical_conflicts": len(logical_conflicts),
-                "total_conflicts": len(conflicts),
-            },
-        )
+    logger.debug("pipeline_stage_conflict_start", extra={"doc_id": doc_id})
+    numeric_conflicts = detect_numeric_conflicts(rules)
+    logical_conflicts = await detect_logical_conflicts(rules, llm)
+    conflicts = numeric_conflicts + logical_conflicts
+    logger.info(
+        "pipeline_stage_conflict_complete",
+        extra={
+            "doc_id": doc_id,
+            "numeric_conflicts": len(numeric_conflicts),
+            "logical_conflicts": len(logical_conflicts),
+            "total_conflicts": len(conflicts),
+        },
+    )
 
-    with trace.span(name="persist_results"):
-        logger.debug("pipeline_stage_persist_start", extra={"doc_id": doc_id})
-        async with db.session() as session:
-            threshold = config.confidence_threshold
-            auto_approved = 0
-            pending_review = 0
-            for rule in rules:
-                status = "pending_review" if rule.confidence < threshold else "auto_approved"
-                if status == "auto_approved":
-                    auto_approved += 1
-                else:
-                    pending_review += 1
-                await queries.insert_rule(session, rule, status=status)
-            for conflict in conflicts:
-                await queries.insert_conflict(session, doc_id, conflict)
-            await session.commit()
-        logger.info(
-            "pipeline_stage_persist_complete",
-            extra={
-                "doc_id": doc_id,
-                "auto_approved": auto_approved,
-                "pending_review": pending_review,
-                "conflicts": len(conflicts),
-            },
-        )
+    logger.debug("pipeline_stage_persist_start", extra={"doc_id": doc_id})
+    async with db.session() as session:
+        threshold = config.confidence_threshold
+        auto_approved = 0
+        pending_review = 0
+        for rule in rules:
+            status = "pending_review" if rule.confidence < threshold else "auto_approved"
+            if status == "auto_approved":
+                auto_approved += 1
+            else:
+                pending_review += 1
+            await queries.insert_rule(session, rule, status=status)
+        for conflict in conflicts:
+            await queries.insert_conflict(session, doc_id, conflict)
+        await session.commit()
+    logger.info(
+        "pipeline_stage_persist_complete",
+        extra={
+            "doc_id": doc_id,
+            "auto_approved": auto_approved,
+            "pending_review": pending_review,
+            "conflicts": len(conflicts),
+        },
+    )
 
-    trace.end(output={"rules_count": len(rules), "conflicts_count": len(conflicts)})
     logger.info(
         "pipeline_complete",
         extra={

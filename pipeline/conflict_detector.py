@@ -38,6 +38,35 @@ _NUMERIC_OPS = {">", "<", ">=", "<="}
 _COMPOUND_OPS = {"AND", "OR", "NOT"}
 
 
+async def detect_conflicts(rules: list[RuleRecord], llm: LLMClient | None = None) -> list[ConflictReport]:
+    """
+    Detect both numeric and logical conflicts in rules.
+
+    Args:
+        rules: List of rules to check for conflicts
+        llm: Optional LLM client for logical conflict detection
+
+    Returns:
+        Combined list of conflict reports from both detection methods
+    """
+    conflicts = detect_numeric_conflicts(rules)
+
+    if llm is not None:
+        try:
+            logical_conflicts = await detect_logical_conflicts(rules, llm)
+            conflicts.extend(logical_conflicts)
+        except Exception as exc:
+            logger.warning(
+                "logical_conflict_detection_failed",
+                extra={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+
+    return conflicts
+
+
 def detect_numeric_conflicts(rules: list[RuleRecord]) -> list[ConflictReport]:
     logger.debug(
         "numeric_conflict_detection_start",

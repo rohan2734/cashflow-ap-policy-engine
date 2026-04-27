@@ -2,7 +2,8 @@ import asyncio
 import logging
 from openai import AsyncOpenAI
 from config.types import LLMConfig
-from llm.tracing import get_langfuse, get_trace_context
+from llm.tracing import get_trace_context
+from langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -46,23 +47,9 @@ class LLMClient:
             self._bedrock = boto3.client("bedrock-runtime", **aws_credentials)
             logger.info("llm_client_bedrock_initialized", extra={"model": config.model})
 
+    @observe()
     async def generate(self, prompt: str) -> str:
-        langfuse = get_langfuse()
         trace_ctx = get_trace_context()
-
-        generation = langfuse.generation(
-            name="llm_generate",
-            model=self._config.model,
-            model_parameters={
-                "temperature": self._config.temperature,
-                "max_tokens": self._config.max_tokens,
-            },
-            input=prompt,
-            metadata={
-                "provider": self._config.provider,
-                **trace_ctx,
-            },
-        )
 
         logger.debug(
             "llm_generate_start",
@@ -78,7 +65,6 @@ class LLMClient:
         for attempt in range(3):
             try:
                 result = await self._call(prompt)
-                generation.end(output=result)
                 logger.info(
                     "llm_generate_success",
                     extra={
@@ -104,7 +90,6 @@ class LLMClient:
                 )
                 await asyncio.sleep(wait)
 
-        generation.end(level="ERROR", error_message=str(last_exc))
         logger.error(
             "llm_generate_failed",
             extra={

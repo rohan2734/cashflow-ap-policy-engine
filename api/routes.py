@@ -34,7 +34,7 @@ async def upload_policy(file: UploadFile):
             await queries.insert_document(session, doc_id, file.filename or "unknown.pdf", config.pipeline_id)
             await session.commit()
         rules = await run_pipeline(tmp, doc_id, config, llm, db)
-        conflicts = detect_conflicts(rules)
+        conflicts = await detect_conflicts(rules, llm)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)

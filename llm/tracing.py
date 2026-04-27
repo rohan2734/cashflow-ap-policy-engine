@@ -2,8 +2,7 @@ import os
 from contextvars import ContextVar
 from typing import Any
 
-from langfuse import Langfuse
-from langfuse.decorators import observe
+from langfuse import Langfuse, observe
 
 _trace_ctx: ContextVar[dict[str, Any]] = ContextVar("langfuse_trace_ctx", default={})
 
