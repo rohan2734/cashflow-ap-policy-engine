@@ -13,7 +13,7 @@ Always run the lint/typecheck command after a series of edits.
 Prefer running a single targeted test over the full suite for speed.
 
 ## Code Style
-
+- Use `codegraph` to explore and analyze what was already built 
 - Prefer functional programming over OOP; use classes only for connectors and interfaces to external systems.
 - Write pure functions — return new values, never mutate input parameters or global state.
 - Write single-purpose functions — no multi-mode behaviour, no flag parameters that switch logic branches.

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(codegraph index *)",
-      "Bash(codegraph status *)"
+      "Bash(codegraph status *)",
+      "Bash(codegraph query *)",
+      "Bash(codegraph context *)"
     ]
   }
 }

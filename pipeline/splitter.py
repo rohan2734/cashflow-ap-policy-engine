@@ -1,25 +1,26 @@
 import re
+
 from shared_types.pipeline import RawBlock, Clause
 
 
-NUMBERED = re.compile(r"^(\d+(\.\d+)*(\([a-z]\))?)\s")
-KEYWORDS = re.compile(r"\b(IF|WHEN|SHALL|MUST|UNLESS|EXCEPT)\b")
+_NUMBERED = re.compile(r"^(\d+(\.\d+)*(\([a-z]\))?)\s")
 
 
 def split_into_clauses(blocks: list[RawBlock]) -> list[Clause]:
     clauses: list[Clause] = []
     for block in blocks:
         clause_id = _numbered_id(block.text)
-        if clause_id:
-            clauses.append(Clause(id=clause_id, text=block.text, page=block.page))
-        elif KEYWORDS.search(block.text):
-            for idx, sent in enumerate(_sentences(block.text)):
-                clauses.append(Clause(id=f"p{block.page}-s{idx}", text=sent, page=block.page))
+        for idx, sent in enumerate(_sentences(block.text)):
+            if clause_id:
+                cid = clause_id if idx == 0 else f"{clause_id}-s{idx}"
+            else:
+                cid = f"p{block.page}-s{idx}"
+            clauses.append(Clause(id=cid, text=sent, page=block.page))
     return clauses
 
 
 def _numbered_id(text: str) -> str | None:
-    m = NUMBERED.match(text)
+    m = _NUMBERED.match(text)
     return m.group(1) if m else None
 
 

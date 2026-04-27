@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 from typing import Any
 
+
 @dataclass(frozen=True)
 class RawBlock:
     text: str
     page: int
+
 
 @dataclass(frozen=True)
 class Clause:
@@ -12,12 +14,20 @@ class Clause:
     text: str
     page: int
 
+
+@dataclass(frozen=True)
+class ReferencedClause:
+    id: str
+    text: str
+
+
 @dataclass(frozen=True)
 class EnrichedClause:
     id: str
     text: str
     page: int
-    referenced_texts: list[str]
+    referenced_clauses: list[ReferencedClause]
+
 
 @dataclass(frozen=True)
 class RawExtraction:
@@ -25,6 +35,8 @@ class RawExtraction:
     condition_raw: dict[str, Any]
     action_raw: str
     exceptions_raw: list[str]
+    confidence_raw: float
+
 
 @dataclass(frozen=True)
 class ValidatedExtraction:
