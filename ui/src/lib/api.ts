@@ -12,6 +12,8 @@ export type ReviewRuleResponse = {
 export type ReviewQueueResponse = { rules: ReviewRuleResponse[] }
 export type PipelineConfigResponse = { pipeline_id: string; name: string; config: Record<string, unknown> }
 export type ProviderConfigResponse = { provider_id: string; name: string; type: string; config: Record<string, unknown> }
+export type ProviderListItem = { provider_id: string; name: string; type: string; config: Record<string, unknown>; is_active: boolean }
+export type ProvidersListResponse = { providers: ProviderListItem[] }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init)
@@ -83,4 +85,12 @@ export async function updateProviderConfig(config: Record<string, unknown>): Pro
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config }),
   })
+}
+
+export async function listProviders(): Promise<ProvidersListResponse> {
+  return request("/config/providers")
+}
+
+export async function switchProvider(providerId: string): Promise<ProviderConfigResponse> {
+  return request(`/config/provider/${providerId}`, { method: "PUT" })
 }

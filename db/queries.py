@@ -17,6 +17,21 @@ async def fetch_active_pipeline(session: AsyncSession) -> PipelineModel:
         raise RuntimeError("No active pipeline found — run seeder first")
     return row
 
+async def fetch_all_providers(session: AsyncSession) -> list[LLMProviderModel]:
+    result = await session.execute(select(LLMProviderModel))
+    return list(result.scalars().all())
+
+async def set_pipeline_provider(
+    session: AsyncSession, pipeline_id: str, provider_id: str
+) -> None:
+    result = await session.execute(
+        select(PipelineModel).where(PipelineModel.pipeline_id == pipeline_id)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise KeyError(f"pipeline_id={pipeline_id!r} not found")
+    row.llm_provider_id = provider_id
+
 async def fetch_provider(session: AsyncSession, provider_id: str) -> LLMProviderModel:
     result = await session.execute(
         select(LLMProviderModel).where(LLMProviderModel.provider_id == provider_id)

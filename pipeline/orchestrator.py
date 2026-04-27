@@ -8,7 +8,7 @@ from pipeline.llm_extractor import extract_clause, ExtractionError
 from pipeline.validator import validate_extraction, ValidationError
 from pipeline.rule_builder import build_rule
 from pipeline.conflict_detector import detect_conflicts
-from llm.client import LLMClient
+from llm.client import LLMClient, LLMCallError
 from llm.prompts import RETRY_EXTRACTION_PROMPT
 from config.types import AppConfig
 from db.connector import DBConnector
@@ -54,7 +54,7 @@ async def _process(
         try:
             raw = await extract_clause(clause, llm, config.llm)
             validated = validate_extraction(raw)
-        except (ExtractionError, ValidationError) as exc:
+        except (ExtractionError, ValidationError, LLMCallError) as exc:
             logger.warning("extraction_retry", extra={"clause_id": clause.id, "error": str(exc)})
             try:
                 text = await llm.generate(RETRY_EXTRACTION_PROMPT.format(clause_text=clause.text))

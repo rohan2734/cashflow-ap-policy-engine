@@ -78,3 +78,15 @@ class ProviderConfigResponse(BaseModel):
 
 class ProviderConfigRequest(BaseModel):
     config: dict[str, Any]
+
+
+class ProviderListItemResponse(BaseModel):
+    provider_id: str
+    name: str
+    type: str
+    config: dict[str, Any]
+    is_active: bool
+
+
+class ProvidersListResponse(BaseModel):
+    providers: list[ProviderListItemResponse]

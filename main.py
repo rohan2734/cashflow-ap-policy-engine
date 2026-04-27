@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
-from api.dependencies import get_db, set_config
+from api.dependencies import get_db, set_config, set_llm, build_llm
 from db.seeder import seed_defaults
 from config.loader import load_config_from_db
 
@@ -15,6 +15,7 @@ async def lifespan(app: FastAPI):
         await seed_defaults(session)
         config = await load_config_from_db(session)
         set_config(config)
+        set_llm(build_llm())
     yield
 
 

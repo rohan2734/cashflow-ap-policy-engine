@@ -6,8 +6,9 @@ from api.schemas import (
     ReviewThresholdResponse, ReviewThresholdRequest,
     PipelineConfigResponse, PipelineConfigRequest,
     ProviderConfigResponse, ProviderConfigRequest,
+    ProviderListItemResponse, ProvidersListResponse,
 )
-from api.dependencies import get_config, get_llm, get_db, set_config
+from api.dependencies import get_config, get_llm, get_db, set_config, set_llm, build_llm
 from pipeline.orchestrator import run_pipeline
 from pipeline.conflict_detector import detect_conflicts
 from engine.executor import execute_rules
@@ -187,6 +188,44 @@ async def update_provider_config(body: ProviderConfigRequest):
         await session.commit()
         updated_config = await load_config_from_db(session)
         set_config(updated_config)
+        set_llm(build_llm())
+    return ProviderConfigResponse(
+        provider_id=provider.provider_id,
+        name=provider.name,
+        type=provider.type,
+        config=provider.config,
+    )
+
+
+@router.get("/config/providers", response_model=ProvidersListResponse)
+async def list_providers():
+    db = get_db()
+    async with db.session() as session:
+        providers = await queries.fetch_all_providers(session)
+        pipeline = await queries.fetch_active_pipeline(session)
+    return ProvidersListResponse(providers=[
+        ProviderListItemResponse(
+            provider_id=p.provider_id,
+            name=p.name,
+            type=p.type,
+            config=p.config,
+            is_active=(p.provider_id == pipeline.llm_provider_id),
+        )
+        for p in providers
+    ])
+
+
+@router.put("/config/provider/{provider_id}", response_model=ProviderConfigResponse)
+async def switch_provider(provider_id: str):
+    config = get_config()
+    db = get_db()
+    async with db.session() as session:
+        provider = await queries.fetch_provider(session, provider_id)
+        await queries.set_pipeline_provider(session, config.pipeline_id, provider_id)
+        await session.commit()
+        updated_config = await load_config_from_db(session)
+        set_config(updated_config)
+        set_llm(build_llm())
     return ProviderConfigResponse(
         provider_id=provider.provider_id,
         name=provider.name,

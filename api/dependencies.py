@@ -4,8 +4,8 @@ from config.types import AppConfig
 from llm.client import LLMClient
 from db.connector import DBConnector
 
-# Set during lifespan startup via set_config(); read by every request via get_config().
 _config: AppConfig | None = None
+_llm: LLMClient | None = None
 
 
 def set_config(config: AppConfig) -> None:
@@ -19,13 +19,7 @@ def get_config() -> AppConfig:
     return _config
 
 
-@lru_cache
-def get_db() -> DBConnector:
-    return DBConnector(os.environ["DATABASE_URL"])
-
-
-@lru_cache
-def get_llm() -> LLMClient:
+def build_llm() -> LLMClient:
     cfg = get_config()
     return LLMClient(
         config=cfg.llm,
@@ -37,3 +31,19 @@ def get_llm() -> LLMClient:
             "region_name": os.environ.get("AWS_REGION", "us-east-1"),
         },
     )
+
+
+def set_llm(llm: LLMClient) -> None:
+    global _llm
+    _llm = llm
+
+
+def get_llm() -> LLMClient:
+    if _llm is None:
+        raise RuntimeError("LLM client not initialized — lifespan did not complete")
+    return _llm
+
+
+@lru_cache
+def get_db() -> DBConnector:
+    return DBConnector(os.environ["DATABASE_URL"])
